@@ -1,14 +1,21 @@
-# Reusable CI for every Public Software repository. Called from each repo's .github/workflows/ci.yml.
+# Reusable CI for every Public Software repository. Called from each repo's .github/workflows/ci.yml on
+# push, pull_request and merge_group; the check-run names ("suite / <job>") are the same for every event, so
+# one ruleset serves pull requests and the merge queue alike. Callers pin a release: rust.yml@<sha> # vX.Y.Z.
 name: rust
 on:
   workflow_call:
+permissions:
+  contents: read   # every job only reads the checkout
 jobs:
   pub-check:
     name: pub-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
       - name: Skeleton, naming, provenance, catalog
+        env:
+          REPO: ${{ github.event.repository.name }}
         run: |
           set -e
           for f in Cargo.toml CATALOG.toml PROVENANCE.md README.md deny.toml CODEOWNERS LICENSE-APACHE LICENSE-MIT; do
@@ -17,14 +24,13 @@ jobs:
           grep -q '^\[repo\]' CATALOG.toml || { echo "::error::CATALOG.toml has no [repo] table"; exit 1; }
           # crates must be named pub-<repo>-<name>; the one exception is the CLI itself,
           # pub-cli in the pub repository (`pub` alone is a Rust keyword and cannot name a package)
-          repo="${GITHUB_REPOSITORY##*/}"
           for c in crates/*/Cargo.toml; do
             [ -e "$c" ] || continue
             n=$(grep -m1 '^name' "$c" | sed -E 's/.*"([^"]+)".*/\1/')
             case "$n" in
-              pub-$repo|pub-$repo-*) ;;
-              pub-cli) [ "$repo" = "pub" ] || { echo "::error::crate $n belongs in the pub repository"; exit 1; } ;;
-              *) echo "::error::crate $n is not named pub-$repo-<name>"; exit 1 ;;
+              "pub-$REPO"|"pub-$REPO-"*) ;;
+              pub-cli) [ "$REPO" = "pub" ] || { echo "::error::crate $n belongs in the pub repository"; exit 1; } ;;
+              *) echo "::error::crate $n is not named pub-$REPO-<name>"; exit 1 ;;
             esac
           done
   # A fresh skeleton is a virtual workspace with no members: cargo refuses to load it. The crate-level
@@ -36,12 +42,14 @@ jobs:
     outputs:
       has_crates: ${{ steps.crates.outputs.has_crates }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
       - id: crates
         run: |
           if ls crates/*/Cargo.toml >/dev/null 2>&1; then echo "has_crates=true" >> "$GITHUB_OUTPUT"
           else echo "has_crates=false" >> "$GITHUB_OUTPUT"; echo "::notice::no crates yet — test, deny and semver skipped"; fi
   test-os:   # check runs: "test-os (<os>)" while running, one "test-os" when skipped
+    name: test-os (${{ matrix.os }})
     needs: probe
     if: needs.probe.outputs.has_crates == 'true'
     strategy:
@@ -49,10 +57,12 @@ jobs:
       matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: rustup update --no-self-update stable && rustup default stable   # the runner ships rustup
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with: { tool: nextest }
       - run: cargo nextest run --workspace --all-features || cargo test --workspace --all-features
       - run: cargo doc --workspace --no-deps
         env: { RUSTDOCFLAGS: -Dwarnings }
@@ -64,10 +74,12 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          case "${{ needs.test-os.result }}" in
-            success|skipped) echo "test legs: ${{ needs.test-os.result }}" ;;
-            *) echo "::error::a test leg ended with ${{ needs.test-os.result }}"; exit 1 ;;
+      - env:
+          LEGS: ${{ needs.test-os.result }}
+        run: |
+          case "$LEGS" in
+            success|skipped) echo "test legs: $LEGS" ;;
+            *) echo "::error::a test leg ended with $LEGS"; exit 1 ;;
           esac
   deny:
     name: deny
@@ -75,8 +87,9 @@ jobs:
     if: needs.probe.outputs.has_crates == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with: { command: check licenses bans sources }
   semver:
     name: semver
@@ -84,8 +97,8 @@ jobs:
     if: needs.probe.outputs.has_crates == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - run: rustup update --no-self-update stable && rustup default stable
+      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         continue-on-error: true   # advisory until the first published release

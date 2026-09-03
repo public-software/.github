@@ -1,0 +1,9 @@
+# Dependabot bumps every SHA-pinned action (and its # vX.Y.Z comment) in the reusable workflows.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    cooldown: { default-days: 7 }   # let a new release settle before it is proposed
+    groups:
+      actions: { patterns: ["*"] }

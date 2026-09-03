@@ -1,16 +1,30 @@
-# Push-mirror every branch and tag to the canonical forge. Needs org variable FORGE_MIRROR_URL and secret FORGE_MIRROR_TOKEN.
+# Push-mirror every branch and tag to the canonical forge. The caller passes the org variable
+# FORGE_MIRROR_URL as an input and the org secret FORGE_MIRROR_TOKEN as the one secret this needs.
 name: mirror
 on:
   workflow_call:
+    inputs:
+      forge_url:
+        description: base URL of the forge, e.g. https://forge.example.org
+        required: true
+        type: string
+    secrets:
+      FORGE_MIRROR_TOKEN:
+        description: token with push access to the mirror
+        required: true
+permissions:
+  contents: read   # the push goes to the forge, never back to GitHub
 jobs:
   mirror:
+    name: mirror
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - run: |
-          repo="${GITHUB_REPOSITORY##*/}"
-          git remote add forge "${{ vars.FORGE_MIRROR_URL }}/public-software/$repo.git"
-          git push --mirror "https://x-token-auth:${{ secrets.FORGE_MIRROR_TOKEN }}@${FORGE_HOST}/public-software/$repo.git" || echo "::warning::mirror push failed"
-        env:
-          FORGE_HOST: ${{ vars.FORGE_MIRROR_URL }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - env:
+          FORGE_URL: ${{ inputs.forge_url }}
+          FORGE_TOKEN: ${{ secrets.FORGE_MIRROR_TOKEN }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          host="${FORGE_URL#*://}"
+          git push --mirror "https://x-token-auth:${FORGE_TOKEN}@${host}/public-software/${REPO}.git" || echo "::warning::mirror push failed"

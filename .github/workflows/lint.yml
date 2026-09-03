@@ -1,0 +1,35 @@
+# The workflow repository lints itself: zizmor (pedantic) for workflow security, actionlint for syntax,
+# expressions and the shell inside run: steps. Both run on every push and pull request.
+name: lint
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions: {}
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # read the workflows under audit
+      actions: read    # online audits read action metadata
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        with:
+          persona: pedantic
+          advanced-security: false
+          annotations: true
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # read the workflows under lint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with: { args: -color }
