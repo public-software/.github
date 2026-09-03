@@ -22,8 +22,24 @@ jobs:
             n=$(grep -m1 '^name' "$c" | sed -E 's/.*"([^"]+)".*/\1/')
             case "$n" in pub-$repo|pub-$repo-*) ;; *) echo "::error::crate $n is not named pub-$repo-<name>"; exit 1;; esac
           done
+  # A fresh skeleton is a virtual workspace with no members: cargo refuses to load it. The crate-level
+  # jobs run only once the repository has at least one crate; until then they are skipped, which GitHub
+  # reports as a successful check run, so the same required checks fit empty and populated repositories.
+  probe:
+    name: probe
+    runs-on: ubuntu-latest
+    outputs:
+      has_crates: ${{ steps.crates.outputs.has_crates }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: crates
+        run: |
+          if ls crates/*/Cargo.toml >/dev/null 2>&1; then echo "has_crates=true" >> "$GITHUB_OUTPUT"
+          else echo "has_crates=false" >> "$GITHUB_OUTPUT"; echo "::notice::no crates yet — test, deny and semver skipped"; fi
   test:
     name: test
+    needs: probe
+    if: needs.probe.outputs.has_crates == 'true'
     strategy:
       fail-fast: false
       matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
@@ -38,6 +54,8 @@ jobs:
         env: { RUSTDOCFLAGS: -Dwarnings }
   deny:
     name: deny
+    needs: probe
+    if: needs.probe.outputs.has_crates == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +63,8 @@ jobs:
         with: { command: check licenses bans sources }
   semver:
     name: semver
+    needs: probe
+    if: needs.probe.outputs.has_crates == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
