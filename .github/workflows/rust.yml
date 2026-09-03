@@ -1,0 +1,54 @@
+# Reusable CI for every Public Software repository. Called from each repo's .github/workflows/ci.yml.
+name: rust
+on:
+  workflow_call:
+jobs:
+  pub-check:
+    name: pub-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skeleton, naming, provenance, catalog
+        run: |
+          set -e
+          for f in Cargo.toml CATALOG.toml PROVENANCE.md README.md deny.toml CODEOWNERS LICENSE-APACHE LICENSE-MIT; do
+            test -f "$f" || { echo "::error::missing $f"; exit 1; }
+          done
+          grep -q '^\[repo\]' CATALOG.toml || { echo "::error::CATALOG.toml has no [repo] table"; exit 1; }
+          # crates must be named pub-<repo>-<name>
+          repo="${GITHUB_REPOSITORY##*/}"
+          for c in crates/*/Cargo.toml; do
+            [ -e "$c" ] || continue
+            n=$(grep -m1 '^name' "$c" | sed -E 's/.*"([^"]+)".*/\1/')
+            case "$n" in pub-$repo|pub-$repo-*) ;; *) echo "::error::crate $n is not named pub-$repo-<name>"; exit 1;; esac
+          done
+  test:
+    name: test
+    strategy:
+      fail-fast: false
+      matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --workspace --all-features || cargo test --workspace --all-features
+      - run: cargo doc --workspace --no-deps
+        env: { RUSTDOCFLAGS: -Dwarnings }
+  deny:
+    name: deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with: { command: check licenses bans sources }
+  semver:
+    name: semver
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        continue-on-error: true   # advisory until the first published release

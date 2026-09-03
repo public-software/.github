@@ -1,0 +1,12 @@
+name: Spec discrepancy
+description: Behaviour differs from the specification or conformance suite
+labels: ["kind/spec-discrepancy"]
+body:
+  - type: input
+    id: spec
+    attributes: { label: Specification and section }
+    validations: { required: true }
+  - type: textarea
+    id: diff
+    attributes: { label: What the spec says vs what we do }
+    validations: { required: true }

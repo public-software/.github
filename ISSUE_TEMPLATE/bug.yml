@@ -1,0 +1,15 @@
+name: Bug
+description: Something is wrong
+labels: ["kind/bug"]
+body:
+  - type: input
+    id: version
+    attributes: { label: Version or commit }
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes: { label: Steps to reproduce }
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes: { label: Expected vs actual }

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/public-software/.github/security/policy
+    about: Please use private vulnerability reporting, never a public issue.
+  - name: Ideas and questions
+    url: https://github.com/public-software/catalog/discussions
+    about: Discussions live on the catalog repository.

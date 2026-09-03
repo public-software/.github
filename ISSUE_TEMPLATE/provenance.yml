@@ -1,0 +1,8 @@
+name: Provenance concern
+description: Question about what was consulted to write this code
+labels: ["kind/provenance"]
+body:
+  - type: textarea
+    id: concern
+    attributes: { label: Which module, and what looks derived from what }
+    validations: { required: true }
