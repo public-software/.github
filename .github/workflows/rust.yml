@@ -15,12 +15,17 @@ jobs:
             test -f "$f" || { echo "::error::missing $f"; exit 1; }
           done
           grep -q '^\[repo\]' CATALOG.toml || { echo "::error::CATALOG.toml has no [repo] table"; exit 1; }
-          # crates must be named pub-<repo>-<name>
+          # crates must be named pub-<repo>-<name>; the one exception is the CLI itself,
+          # pub-cli in the pub repository (`pub` alone is a Rust keyword and cannot name a package)
           repo="${GITHUB_REPOSITORY##*/}"
           for c in crates/*/Cargo.toml; do
             [ -e "$c" ] || continue
             n=$(grep -m1 '^name' "$c" | sed -E 's/.*"([^"]+)".*/\1/')
-            case "$n" in pub-$repo|pub-$repo-*) ;; *) echo "::error::crate $n is not named pub-$repo-<name>"; exit 1;; esac
+            case "$n" in
+              pub-$repo|pub-$repo-*) ;;
+              pub-cli) [ "$repo" = "pub" ] || { echo "::error::crate $n belongs in the pub repository"; exit 1; } ;;
+              *) echo "::error::crate $n is not named pub-$repo-<name>"; exit 1 ;;
+            esac
           done
   # A fresh skeleton is a virtual workspace with no members: cargo refuses to load it. The crate-level
   # jobs run only once the repository has at least one crate; until then they are skipped, which GitHub
