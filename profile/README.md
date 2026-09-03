@@ -1,8 +1,7 @@
 <p align="center">
-  <img src="../brand/wordmark-dark.svg#gh-dark-mode-only" width="360" alt="Public Software">
-  <img src="../brand/wordmark-light.svg#gh-light-mode-only" width="360" alt="Public Software">
+  <img src="https://raw.githubusercontent.com/public-software/.github/main/brand/ledger.png" width="320" alt="The Public Software ledger">
 </p>
-<p align="center"><b>Software as public infrastructure.</b></p>
+<p align="center"><b>Public Software</b> · Software as public infrastructure.</p>
 
 Public Software is a from-scratch, spec-first reimplementation of the software world as one suite: firmware, kernel, toolchain, desktop, office, media, engineering, enterprise — written in Rust, held in public. Every repository signs the same seven contracts, so the parts fit. Nothing here is a fork.
 
