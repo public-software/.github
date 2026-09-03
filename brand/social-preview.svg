@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <rect width="1280" height="640" fill="#F2F3F1"/>
+  <rect x="96" y="200" width="240" height="240" rx="41" fill="#1F4E8C"/>
+  <rect x="148" y="361" width="136" height="26" rx="8" fill="#F2F3F1"/>
+  <text x="400" y="300" font-family="Public Sans, system-ui, sans-serif" font-weight="800" font-size="112" letter-spacing="-3" fill="#14181F">Public</text>
+  <text x="400" y="412" font-family="Public Sans, system-ui, sans-serif" font-weight="800" font-size="112" letter-spacing="-3" fill="#1F4E8C">Software</text>
+  <text x="400" y="488" font-family="Public Sans, system-ui, sans-serif" font-weight="500" font-size="34" fill="#5B6472">The whole software stack, rebuilt from scratch in Rust.</text>
+  <text x="400" y="548" font-family="Public Sans, system-ui, sans-serif" font-weight="600" font-size="28" letter-spacing="1" fill="#1F4E8C">publicsoftware.dev</text>
+</svg>
