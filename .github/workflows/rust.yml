@@ -36,8 +36,7 @@ jobs:
         run: |
           if ls crates/*/Cargo.toml >/dev/null 2>&1; then echo "has_crates=true" >> "$GITHUB_OUTPUT"
           else echo "has_crates=false" >> "$GITHUB_OUTPUT"; echo "::notice::no crates yet — test, deny and semver skipped"; fi
-  test-os:
-    name: test
+  test-os:   # check runs: "test-os (<os>)" while running, one "test-os" when skipped
     needs: probe
     if: needs.probe.outputs.has_crates == 'true'
     strategy:
