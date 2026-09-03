@@ -36,7 +36,7 @@ jobs:
         run: |
           if ls crates/*/Cargo.toml >/dev/null 2>&1; then echo "has_crates=true" >> "$GITHUB_OUTPUT"
           else echo "has_crates=false" >> "$GITHUB_OUTPUT"; echo "::notice::no crates yet — test, deny and semver skipped"; fi
-  test:
+  test-os:
     name: test
     needs: probe
     if: needs.probe.outputs.has_crates == 'true'
@@ -52,6 +52,19 @@ jobs:
       - run: cargo nextest run --workspace --all-features || cargo test --workspace --all-features
       - run: cargo doc --workspace --no-deps
         env: { RUSTDOCFLAGS: -Dwarnings }
+  # Fan-in with a stable check-run name: a skipped matrix reports one "test" check, a running matrix
+  # reports one per leg, so rulesets require this job ("suite / test") rather than the legs.
+  test:
+    name: test
+    needs: [probe, test-os]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          case "${{ needs.test-os.result }}" in
+            success|skipped) echo "test legs: ${{ needs.test-os.result }}" ;;
+            *) echo "::error::a test leg ended with ${{ needs.test-os.result }}"; exit 1 ;;
+          esac
   deny:
     name: deny
     needs: probe
