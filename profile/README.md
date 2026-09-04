@@ -5,7 +5,7 @@
 
 Public Software is a from-scratch, spec-first reimplementation of the software world as one suite: firmware, kernel, toolchain, desktop, office, media, engineering, enterprise — written in Rust, held in public. Every repository signs the same seven contracts, so the parts fit. Nothing here is a fork.
 
-**Shipped:** 10 of 57 repositories have a first crate, as of 2026-09-03 · **Current train:** none yet (the first is 2027.1) · **Nightly suite build:** not yet running · [Ledger](https://github.com/public-software/catalog) · [Roadmap](https://github.com/public-software/catalog) · [Charter](https://github.com/public-software/docs)
+**Shipped:** 10 of 57 repositories have a first crate, as of 2026-09-04 · **Current train:** none yet (the first is 2027.1) · **Nightly suite build:** not yet running · [Ledger](https://github.com/public-software/catalog) · [Roadmap](https://github.com/public-software/catalog) · [Charter](https://github.com/public-software/docs)
 
 ## Start here
 - New to the suite → the handbook in [`docs`](https://github.com/public-software/docs)

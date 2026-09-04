@@ -33,10 +33,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
-      # review.yml checks its own release out through job.workflow_repository / job.workflow_sha, newer than 1.7.12's
-      # model of the job context; drop the -ignore once actionlint knows them
+      # review.yml checks its own release out through job.workflow_repository / job.workflow_sha and grants the
+      # copilot-requests permission (2026-07), both newer than 1.7.12's model (the latest release, 2026-03); drop the
+      # -ignore patterns once actionlint knows them
       - uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
-        with: { args: -color -ignore workflow_(sha|repository).*not.defined }
+        with: { args: -color -ignore workflow_(sha|repository).*not.defined -ignore unknown.permission.scope..copilot-requests }
   # The check-run contract: the conformance crate in public-software/suite reads the workflows under review here as the
   # reusable side, suite's own ci.yml and review.yml as the callers, and the rules GitHub applies to suite's main;
   # a renamed job, a run-dependent name or a caller that skips the merge queue fails the pull request.

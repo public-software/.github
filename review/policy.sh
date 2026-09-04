@@ -9,7 +9,7 @@
 #     body.txt               the pull request description
 #     provenance-added.txt   the lines the pull request adds to PROVENANCE.md
 #   AGENT_RESULT    needs.agent.result: success | failure | cancelled | skipped
-#   AGENT_SKIPPED   why the agent did not run: "" | merge_group | draft | fork | no-key
+#   AGENT_SKIPPED   why the agent did not run: "" | merge_group | draft | fork
 #   RUBRIC_URL      where the rubric is published (optional)
 #
 # Rubric rules: scope, tests, provenance, trailer, secrets, semver, agents — the agent judges all seven;
@@ -44,11 +44,11 @@ provenance_findings() { copyleft_lines "$provenance_file" "PROVENANCE.md"; copyl
 
 # agent_findings — the agent's own findings, or a hard finding when there is no verdict to trust
 agent_findings() {
-  case "$agent_skipped" in
-    no-key) finding agents hard "the agent review did not run: the organization secret ANTHROPIC_API_KEY is not set for this repository"; return 0 ;;
-    fork|draft) return 0 ;;
-  esac
-  if [[ "$agent_result" != "success" ]]; then finding agents hard "the agent review did not complete ($agent_result); re-run the failed job"; return 0; fi
+  case "$agent_skipped" in fork|draft) return 0 ;; esac
+  if [[ "$agent_result" != "success" ]]; then
+    finding agents hard "the agent review did not complete ($agent_result); re-run the failed job — if its log shows an authentication or entitlement error, the organization policy \"Allow use of Copilot CLI billed to the organization\" is off"
+    return 0
+  fi
   [[ -s "$verdict_file" ]] || return 0
   jq -c '.findings[]? | {rule, severity, detail, location: (.location // "")}' "$verdict_file"
 }
@@ -70,7 +70,7 @@ comment() {
   if (( hard > 0 )); then printf '### Hard findings (block the merge)\n\n'; bullets hard "$all"; printf '\n'; fi
   if (( soft > 0 )); then printf '### Soft findings (advisory)\n\n'; bullets soft "$all"; printf '\n'; fi
   case "$agent_skipped" in
-    fork) printf '_The agent reviews branches of this repository only: a fork cannot see the organization secret. A maintainer pushes the branch here for the agent pass; the checks above ran._\n\n' ;;
+    fork) printf '_The agent reviews branches of this repository only: a fork'"'"'s workflow token carries no Copilot permission. A maintainer pushes the branch here for the agent pass; the checks above ran._\n\n' ;;
     draft) printf '_Draft: the agent reviews once the pull request is ready for review; the checks above ran._\n\n' ;;
   esac
   [[ -n "$rubric_url" ]] && printf 'Rubric: %s\n' "$rubric_url"

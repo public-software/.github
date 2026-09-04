@@ -15,15 +15,17 @@ Every public document of every repository is written in Simplified Technical Eng
 |---|---|---|
 | `rust.yml` | `ci.yml` in every repository, on push, pull_request and merge_group | skeleton and naming check and `typos` always; test / doc / deny / semver / vet / audit once the repository has a crate; `mutants` on a pull request's diff; `miri` where a crate has `unsafe` |
 | `mirror.yml` | `mirror.yml` in every repository, when `FORGE_MIRROR_URL` is set | push-mirrors every branch and tag to the forge |
+| `review.yml` | `review.yml` in every repository, on pull_request and merge_group | the agent review (the GitHub Copilot CLI on the workflow's own token) and the required check `suite / policy` |
 
-Both are versioned as **immutable releases** of this repository. Callers pin the release commit:
+All three are versioned as **immutable releases** of this repository. Callers pin the release commit:
 
 ```yaml
-uses: public-software/.github/.github/workflows/rust.yml@<sha> # v1.1.1
+uses: public-software/.github/.github/workflows/rust.yml@<sha> # v2.0.0
 ```
 
-`v1.1.1` is the current release. The tag `v1` (the major) always points at the newest `v1.x.y`
-release commit and exists for humans reading the history; it is never itself released, so it can move.
+`v2.0.0` is the current release. The major tag (`v2` for every `v2.x.y`) always points at the
+newest release commit of its major and exists for humans reading the history; it is never itself released, so it
+can move. `v1` stays on the last `v1.x.y` release, whose `review.yml` took an Anthropic key.
 
 Every third-party action in these workflows is pinned to a full commit SHA with its version as a comment.
 Dependabot (`.github/dependabot.yml`, `github-actions` ecosystem) bumps the SHA and the comment together,
@@ -56,6 +58,10 @@ change to the rulesets in the bootstrap kit, landed together.
    release (one commit per repository, none when it already matches) and renders new repositories against it
    from day one; Dependabot proposes later releases in each repository.
 
+The Copilot CLI that `review.yml` installs (`npm install -g @github/copilot@<version>`) is pinned to an exact
+version the same way and bumped by hand with a release: no Dependabot ecosystem sees an install inside a
+`run:` step.
+
 ## Verification depth
 
 Beyond building and testing, `rust.yml` proves a change before it merges. `mutants` runs
@@ -73,30 +79,37 @@ skipped job reports success, so an empty repository stays green.
 ## Agent review
 
 `review.yml` is the third reusable workflow: called from `review.yml` in every repository on `pull_request`
-and `merge_group`. Its `agent` job runs [claude-code-action](https://github.com/anthropics/claude-code-action)
-with read-only tools against [`review/RUBRIC.md`](review/RUBRIC.md) and returns a structured verdict; its
+and `merge_group`. Its `agent` job runs the [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli)
+(`npm install -g @github/copilot@<version>`, an exact version) with read-only tools against
+[`review/RUBRIC.md`](review/RUBRIC.md); `review/verdict.sh` turns the answer into a structured verdict (the
+first JSON object of the answer, checked against the schema, so a malformed answer fails the job); the
 `policy` job (`review/policy.sh`) adds the trailer and provenance checks, fails the required check
-`suite / policy` on any hard finding and posts one comment, edited in place. Both the rubric and the script
-are checked out at `job.workflow_sha`, so a repository pinned to a release reviews against that release's
-rubric. The same rubric is published in the handbook so contributors can self-check.
+`suite / policy` on any hard finding and posts one comment, edited in place. The rubric and both scripts are
+checked out at `job.workflow_sha`, so a repository pinned to a release reviews against that release's rubric.
+The same rubric is published in the handbook so contributors can self-check.
 
-**Secret model.** The agent authenticates with one organization Actions secret, `ANTHROPIC_API_KEY`,
-visible to every repository. Create it in a dedicated [Anthropic Console](https://console.anthropic.com)
-workspace with a monthly spend limit; `./bootstrap.sh 04` sets the secret when `ANTHROPIC_API_KEY` is in the
-environment (or in the kit's `.env`), and never prints it. Rotate with
-`gh secret set ANTHROPIC_API_KEY --org public-software --visibility all`. The workflow takes an API key only: a Claude
-OAuth token belongs to one person's subscription and is not shared as an organization secret. The GitHub
-side needs no Claude GitHub App: the workflow passes `github_token: ${{ github.token }}`, so the agent reads
-the pull request with the job's own token and the comment comes from `github-actions[bot]`.
+**Token model.** There is no secret. The agent job declares `copilot-requests: write`, and with that
+permission the workflow's own `GITHUB_TOKEN` authenticates the Copilot CLI; the AI credits go to the
+organization's Copilot budget, not to any person. Two organization policies make this work (Settings →
+Copilot → Policies): "Copilot CLI" and "Allow use of Copilot CLI billed to the organization" (Copilot
+Business). Without them the CLI fails with an authentication or entitlement error, the job names the policy,
+and `suite / policy` blocks with "no verdict to trust". The caller grants the same permission to its `suite`
+job; a fork's pull request runs no agent, because a fork's token carries no Copilot permission (the
+deterministic checks and the human review still gate it, and a maintainer pushes the branch into the
+repository for the agent pass). The comment comes from `github-actions[bot]`.
+
+**Read-only by construction.** The CLI runs with `--deny-tool=write --deny-tool=url` (a deny rule beats every
+allow, so no file write and no URL fetch can happen), a shell allow list of `gh pr diff`, `gh pr view`,
+`git log`, `git diff` and `git show`, the builtin GitHub MCP server off (`gh` is the one channel to GitHub)
+and the branch's own `AGENTS.md` not loaded as instructions (`--no-custom-instructions`: the prompt names it
+as something to judge against, never as something to obey).
 
 **Cost controls.** The agent runs once per pull request revision: `concurrency` on the caller cancels a
 review a new push supersedes, drafts wait for `ready_for_review`, the merge queue reuses the verdict and runs
-no agent, and a fork's pull request runs no agent (it cannot see the secret; the deterministic checks and
-the human review still gate it, and a maintainer pushes the branch into the repository for the agent pass).
-Each run is capped by the `max_turns` input (default 40) and the tools are read-only, so a review cannot
-turn into an edit session. `model` picks the reviewer (default `claude-opus-5`); a repository that wants a
-cheaper reviewer passes `model: claude-sonnet-5` from its caller. The spend limit on the workspace is the
-hard ceiling.
+no agent. Each run is capped by the `max_ai_credits` input (default 100, one credit is $0.01; the CLI's
+soft cap, minimum 30) and by the agent job's `timeout-minutes`. `model` picks the reviewer (default `auto`,
+which lets Copilot choose); a repository that wants a specific model passes its Copilot model id from its
+caller. The organization's monthly AI-credit budget (Billing → Budgets) is the hard ceiling.
 
 **CodeRabbit** is the free second opinion on public repositories, advisory only: every repository ships a
 `.coderabbit.yaml` with `request_changes_workflow: false`; the app is installed on the organization by hand

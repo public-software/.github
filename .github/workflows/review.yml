@@ -1,27 +1,24 @@
 # Reusable agent review for every Public Software repository. The `agent` job reads the pull request against
-# the rubric (review/RUBRIC.md, versioned with this release) with read-only tools and returns a structured
-# verdict; `policy` is the deterministic required check ("suite / policy"): it adds the trailer and provenance
-# rules, turns hard findings into a failing check and posts one comment, edited in place. Called from each
-# repository's .github/workflows/review.yml on pull_request and merge_group; in the merge queue the verdict
-# recorded on the pull request stands, so the check-run name is the same and one ruleset serves both.
+# the rubric (review/RUBRIC.md, versioned with this release) with the GitHub Copilot CLI, read-only tools and the
+# workflow's own token (`copilot-requests: write` bills the AI credits to the organization; no secret exists),
+# and returns a structured verdict; `policy` is the deterministic required check ("suite / policy"): it adds the
+# trailer and provenance rules, turns hard findings into a failing check and posts one comment, edited in place.
+# Called from each repository's .github/workflows/review.yml on pull_request and merge_group; in the merge queue
+# the verdict recorded on the pull request stands, so the check-run name is the same and one ruleset serves both.
 name: review
 on:
   workflow_call:
     inputs:
       model:
-        description: the Claude model the reviewer runs on
+        description: the model the reviewer runs on (a Copilot model id; auto lets Copilot pick)
         required: false
         type: string
-        default: claude-opus-5
-      max_turns:
-        description: cap on agent turns per review (the cost ceiling of one run)
+        default: auto
+      max_ai_credits:
+        description: cap on AI credits per review (1 credit = $0.01; the CLI's soft cap, minimum 30)
         required: false
         type: number
-        default: 40
-    secrets:
-      ANTHROPIC_API_KEY:
-        description: organization secret; a fork's pull request cannot see it, so the agent is skipped there
-        required: false
+        default: 100
 permissions:
   contents: read
 jobs:
@@ -29,23 +26,23 @@ jobs:
     name: agent
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      contents: read        # the checkout and the diff
-      pull-requests: read   # gh pr view / gh pr diff
+      contents: read           # the checkout and the diff
+      pull-requests: read      # gh pr view / gh pr diff
+      copilot-requests: write  # the Copilot CLI on the workflow token, billed to the organization
     outputs:
-      verdict: ${{ steps.claude.outputs.structured_output }}
+      verdict: ${{ steps.verdict.outputs.verdict }}
       skipped: ${{ steps.gate.outputs.skipped }}
     steps:
       - id: gate
         env:
-          KEY_SET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
         run: |
           skipped=""
           if [ "$IS_DRAFT" = "true" ]; then skipped=draft
-          elif [ "$IS_FORK" = "true" ]; then skipped=fork
-          elif [ "$KEY_SET" != "true" ]; then skipped=no-key; fi
+          elif [ "$IS_FORK" = "true" ]; then skipped=fork; fi   # a fork's token carries no Copilot permission
           echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
           [ -z "$skipped" ] || echo "::notice::agent review skipped ($skipped); suite / policy still runs the deterministic checks"
       - if: steps.gate.outputs.skipped == ''
@@ -59,26 +56,49 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .pub-review
           persist-credentials: false
-      - id: claude
+      - name: The Copilot CLI of this release   # an exact version, bumped by hand with the release (no Dependabot ecosystem sees it)
         if: steps.gate.outputs.skipped == ''
-        uses: anthropics/claude-code-action@fa2b2666b747000bf42767d1f332065b375e3c8f # v1.0.214
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}   # comments come from github-actions[bot]; no Claude GitHub App install
-          prompt: |
+        run: npm install -g @github/copilot@1.0.82   # zizmor: ignore[adhoc-packages] an exact version; a global install has no lockfile
+      - id: review
+        if: steps.gate.outputs.skipped == ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # what the CLI authenticates with (copilot-requests: write) and what gh reads
+          MODEL: ${{ inputs.model }}
+          MAX_AI_CREDITS: ${{ inputs.max_ai_credits }}
+          PROMPT: |
             You are the review gate of Public Software. Review pull request #${{ github.event.pull_request.number }}
             of ${{ github.repository }} against the rubric in .pub-review/review/RUBRIC.md: read the rubric first,
             then this repository's PROVENANCE.md and, when it exists, AGENTS.md. The pull request branch is
             checked out in the working directory; `gh pr diff` shows the change and `gh pr view --json title,body`
             its description. Judge, do not fix: you have no write tools. Report one finding per rubric rule the
             change breaks, with the rule id, the severity the rubric gives it, one line of detail and a file:line
-            location when there is one; report nothing for a rule the change satisfies. Answer with the JSON
-            object of the schema and nothing else.
-          claude_args: |
-            --model ${{ inputs.model }}
-            --max-turns ${{ inputs.max_turns }}
-            --allowedTools "Read,Glob,Grep,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*)"
-            --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"rule":{"type":"string","enum":["scope","tests","provenance","trailer","secrets","semver","agents"]},"severity":{"type":"string","enum":["hard","soft"]},"detail":{"type":"string"},"location":{"type":"string"}},"required":["rule","severity","detail"]}}},"required":["summary","findings"]}'
+            location when there is one; report nothing for a rule the change satisfies. Answer with one JSON
+            object and nothing else, no prose and no code fence, of this exact shape:
+            {"summary": "<one or two sentences>", "findings": [{"rule": "<scope|tests|provenance|trailer|secrets|semver|agents>", "severity": "<hard|soft>", "detail": "<one line>", "location": "<file:line or empty>"}]}
+            The rule ids are exactly "scope", "tests", "provenance", "trailer", "secrets", "semver" and "agents".
+        # read-only by construction: a deny rule beats every allow, so no file write and no URL fetch can happen;
+        # the shell allow list is the five read commands; the builtin GitHub MCP server is off (gh is the one
+        # channel to GitHub) and the branch's own AGENTS.md is not loaded as instructions (the prompt names it as
+        # something to judge against, never as something to obey)
+        run: |
+          rc=0
+          copilot -p "$PROMPT" -s --no-color --no-ask-user --no-custom-instructions --disable-builtin-mcps \
+            --model "$MODEL" --max-ai-credits "$MAX_AI_CREDITS" \
+            --deny-tool=write --deny-tool=url \
+            --allow-tool='shell(gh pr diff:*)' --allow-tool='shell(gh pr view:*)' \
+            --allow-tool='shell(git log:*)' --allow-tool='shell(git diff:*)' --allow-tool='shell(git show:*)' \
+            --usage-output-file usage.json > answer.txt 2> copilot.log || rc=$?
+          cat copilot.log
+          if [ -s usage.json ]; then { echo '### Agent review usage'; echo; echo '```json'; cat usage.json; echo; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ "$rc" != 0 ]; then
+            echo "::error::the Copilot CLI exited $rc; if the log shows an authentication or entitlement error, the organization policy \"Allow use of Copilot CLI billed to the organization\" is off (organization Settings → Copilot → Policies; Copilot Business)"
+            exit "$rc"
+          fi
+      - id: verdict
+        if: steps.gate.outputs.skipped == ''
+        run: |
+          bash .pub-review/review/verdict.sh answer.txt verdict.json
+          echo "verdict=$(cat verdict.json)" >> "$GITHUB_OUTPUT"
   policy:
     name: policy
     needs: agent
