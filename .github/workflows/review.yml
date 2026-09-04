@@ -1,0 +1,132 @@
+# Reusable agent review for every Public Software repository. The `agent` job reads the pull request against
+# the rubric (review/RUBRIC.md, versioned with this release) with read-only tools and returns a structured
+# verdict; `policy` is the deterministic required check ("suite / policy"): it adds the trailer and provenance
+# rules, turns hard findings into a failing check and posts one comment, edited in place. Called from each
+# repository's .github/workflows/review.yml on pull_request and merge_group; in the merge queue the verdict
+# recorded on the pull request stands, so the check-run name is the same and one ruleset serves both.
+name: review
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: the Claude model the reviewer runs on
+        required: false
+        type: string
+        default: claude-opus-5
+      max_turns:
+        description: cap on agent turns per review (the cost ceiling of one run)
+        required: false
+        type: number
+        default: 40
+    secrets:
+      ANTHROPIC_API_KEY:
+        description: organization secret; a fork's pull request cannot see it, so the agent is skipped there
+        required: false
+permissions:
+  contents: read
+jobs:
+  agent:
+    name: agent
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read        # the checkout and the diff
+      pull-requests: read   # gh pr view / gh pr diff
+    outputs:
+      verdict: ${{ steps.claude.outputs.structured_output }}
+      skipped: ${{ steps.gate.outputs.skipped }}
+    steps:
+      - id: gate
+        env:
+          KEY_SET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          skipped=""
+          if [ "$IS_DRAFT" = "true" ]; then skipped=draft
+          elif [ "$IS_FORK" = "true" ]; then skipped=fork
+          elif [ "$KEY_SET" != "true" ]; then skipped=no-key; fi
+          echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
+          [ -z "$skipped" ] || echo "::notice::agent review skipped ($skipped); suite / policy still runs the deterministic checks"
+      - if: steps.gate.outputs.skipped == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: The rubric of this release
+        if: steps.gate.outputs.skipped == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pub-review
+          persist-credentials: false
+      - id: claude
+        if: steps.gate.outputs.skipped == ''
+        uses: anthropics/claude-code-action@fa2b2666b747000bf42767d1f332065b375e3c8f # v1.0.214
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}   # comments come from github-actions[bot]; no Claude GitHub App install
+          prompt: |
+            You are the review gate of Public Software. Review pull request #${{ github.event.pull_request.number }}
+            of ${{ github.repository }} against the rubric in .pub-review/review/RUBRIC.md: read the rubric first,
+            then this repository's PROVENANCE.md and, when it exists, AGENTS.md. The pull request branch is
+            checked out in the working directory; `gh pr diff` shows the change and `gh pr view --json title,body`
+            its description. Judge, do not fix: you have no write tools. Report one finding per rubric rule the
+            change breaks, with the rule id, the severity the rubric gives it, one line of detail and a file:line
+            location when there is one; report nothing for a rule the change satisfies. Answer with the JSON
+            object of the schema and nothing else.
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Read,Glob,Grep,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*)"
+            --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"rule":{"type":"string","enum":["scope","tests","provenance","trailer","secrets","semver","agents"]},"severity":{"type":"string","enum":["hard","soft"]},"detail":{"type":"string"},"location":{"type":"string"}},"required":["rule","severity","detail"]}}},"required":["summary","findings"]}'
+  policy:
+    name: policy
+    needs: agent
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # the one review comment, edited in place
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: The policy of this release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .pub-review
+          persist-credentials: false
+      - name: Gather the pull request
+        if: github.event_name == 'pull_request'
+        run: |
+          gh api "repos/$REPO/pulls/$NUMBER/commits" --paginate --jq '.[] | {sha, message: .commit.message}' | jq -s . > commits.json
+          gh pr view "$NUMBER" --repo "$REPO" --json body --jq .body > body.txt
+          gh pr diff "$NUMBER" --repo "$REPO" \
+            | awk '/^\+\+\+ b\/PROVENANCE\.md$/ { p = 1; next } /^\+\+\+ / { p = 0 } p && /^\+/ { print substr($0, 2) }' > provenance-added.txt
+      - id: verdict
+        env:
+          VERDICT: ${{ needs.agent.outputs.verdict }}
+          AGENT_RESULT: ${{ needs.agent.result }}
+          AGENT_SKIPPED: ${{ github.event_name == 'merge_group' && 'merge_group' || needs.agent.outputs.skipped }}
+          RUBRIC_URL: https://github.com/${{ job.workflow_repository }}/blob/${{ job.workflow_sha }}/review/RUBRIC.md
+        run: |
+          printf '%s' "$VERDICT" > verdict.json
+          rc=0; bash .pub-review/review/policy.sh verdict.json commits.json body.txt provenance-added.txt > comment.md || rc=$?
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+      - name: One comment, edited in place
+        if: github.event_name == 'pull_request'
+        run: |
+          id="$(gh api "repos/$REPO/issues/$NUMBER/comments" --paginate --jq '.[] | select(.body | startswith("<!-- pub-review -->")) | .id' | head -n1)"
+          if [ -n "$id" ]; then gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@comment.md > /dev/null
+          else gh api -X POST "repos/$REPO/issues/$NUMBER/comments" -F body=@comment.md > /dev/null
+          fi || echo "::warning::could not post the review comment (a fork's token is read-only); the verdict is in the job summary"
+      - name: Gate
+        env:
+          RC: ${{ steps.verdict.outputs.rc }}
+        run: |
+          [ "$RC" = "0" ] || echo "::error::suite / policy: hard findings block the merge; see the review comment"
+          exit "$RC"

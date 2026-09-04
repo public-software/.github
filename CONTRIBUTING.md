@@ -5,3 +5,4 @@
 3. Cross-repository or interface changes need an RFC in `public-software/rfcs`. Repo-local design goes in `docs/adr/`.
 4. Sign off commits (DCO) and sign them. Squash merges use the PR title as a conventional commit.
 5. Licence: `Apache-2.0 OR MIT` for code, CC-BY-4.0 for specs and content. No CLA.
+6. Write every public document in Simplified Technical English (ASD-STE100). The rules are in [WRITING.md](WRITING.md).

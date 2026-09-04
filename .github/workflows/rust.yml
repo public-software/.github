@@ -18,7 +18,7 @@ jobs:
           REPO: ${{ github.event.repository.name }}
         run: |
           set -e
-          for f in Cargo.toml CATALOG.toml PROVENANCE.md README.md deny.toml CODEOWNERS LICENSE-APACHE LICENSE-MIT; do
+          for f in Cargo.toml CATALOG.toml PROVENANCE.md README.md deny.toml supply-chain/config.toml CODEOWNERS LICENSE-APACHE LICENSE-MIT; do
             test -f "$f" || { echo "::error::missing $f"; exit 1; }
           done
           grep -q '^\[repo\]' CATALOG.toml || { echo "::error::CATALOG.toml has no [repo] table"; exit 1; }
@@ -41,13 +41,17 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_crates: ${{ steps.crates.outputs.has_crates }}
+      has_unsafe: ${{ steps.crates.outputs.has_unsafe }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
       - id: crates
         run: |
           if ls crates/*/Cargo.toml >/dev/null 2>&1; then echo "has_crates=true" >> "$GITHUB_OUTPUT"
-          else echo "has_crates=false" >> "$GITHUB_OUTPUT"; echo "::notice::no crates yet — test, deny and semver skipped"; fi
+          else echo "has_crates=false" >> "$GITHUB_OUTPUT"; echo "::notice::no crates yet — test, deny, semver, mutants, vet and audit skipped"; fi
+          # Miri has work only where a crate says `unsafe`; elsewhere it is skipped
+          if grep -rqw --include='*.rs' unsafe crates/ 2>/dev/null; then echo "has_unsafe=true" >> "$GITHUB_OUTPUT"
+          else echo "has_unsafe=false" >> "$GITHUB_OUTPUT"; echo "::notice::no unsafe code — miri skipped"; fi
   test-os:   # check runs: "test-os (<os>)" while running, one "test-os" when skipped
     name: test-os (${{ matrix.os }})
     needs: probe
@@ -102,3 +106,76 @@ jobs:
       - run: rustup update --no-self-update stable && rustup default stable
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
         continue-on-error: true   # advisory until the first published release
+  # Verification depth: a merged change is proven, not trusted. Each job below is a required check; one
+  # that has nothing to do (no crate, no unsafe, not a pull request) is skipped and reports success.
+  # mutants: the tests must notice when the code this pull request changed is broken
+  mutants:
+    name: mutants
+    needs: probe
+    if: needs.probe.outputs.has_crates == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - run: rustup update --no-self-update stable && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with:
+          tool: cargo-mutants,nextest
+      - env:
+          BASE: ${{ github.base_ref }}
+        run: git diff "origin/$BASE"...HEAD > git.diff
+      - run: cargo mutants --no-shuffle -vV --in-diff git.diff --test-tool nextest
+        continue-on-error: true   # advisory until 2026-10-03; then a surviving mutant in changed code blocks the merge
+  # vet: every third-party crate carries an audit, the repository's own or one imported from the shared pool
+  vet:
+    name: vet
+    needs: probe
+    if: needs.probe.outputs.has_crates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: rustup update --no-self-update stable && rustup default stable
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with: { tool: cargo-vet }
+      - run: |
+          cargo vet --locked || { echo "::error::a dependency has no audit — run 'cargo vet' locally, audit or exempt what it lists, commit supply-chain/"; exit 1; }
+  # audit: RustSec advisories and yanked releases in the lockfile
+  audit:
+    name: audit
+    needs: probe
+    if: needs.probe.outputs.has_crates == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: rustup update --no-self-update stable && rustup default stable
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with: { tool: cargo-audit }
+      - run: |
+          [ -f Cargo.lock ] || cargo generate-lockfile
+          cargo audit --deny yanked
+  # typos: spelling in code and prose alike; needs no crate, so it runs on every repository
+  typos:
+    name: typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        with: { tool: typos }
+      - run: typos
+  # miri: undefined behaviour in unsafe code; runs only when the probe found an `unsafe` in a crate
+  miri:
+    name: miri
+    needs: probe
+    if: needs.probe.outputs.has_unsafe == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - run: rustup toolchain install nightly --component miri --no-self-update && rustup default nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo miri setup
+      - run: cargo miri test --workspace --all-features

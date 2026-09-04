@@ -16,6 +16,8 @@
   {"name":"good first issue","color":"2F7D4F","description":"Scoped, documented, a maintainer will help"},
   {"name":"help wanted","color":"2F7D4F","description":"Maintainers would welcome a contributor here"},
   {"name":"breaking-change","color":"B03A2E","description":"Requires a semver-major bump and an upgrade note"},
+  {"name":"rfc/final-comment-period","color":"6B2D5C","description":"RFC in its final comment period: 10 calendar days, then a decision"},
+  {"name":"rfc/postponed","color":"8A93A0","description":"RFC closed for now; the question stands, the time is not right"},
   {"name":"changelog/added","color":"1F4E8C","description":"Release notes: Added"},
   {"name":"changelog/changed","color":"1F4E8C","description":"Release notes: Changed"},
   {"name":"changelog/fixed","color":"1F4E8C","description":"Release notes: Fixed"},

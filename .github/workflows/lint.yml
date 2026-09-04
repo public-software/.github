@@ -1,5 +1,7 @@
 # The workflow repository lints itself: zizmor (pedantic) for workflow security, actionlint for syntax,
-# expressions and the shell inside run: steps. Both run on every push and pull request.
+# expressions and the shell inside run: steps, and the conformance crate of public-software/suite for the check-run
+# contract (every check the rulesets require is a check run the callers produce from these workflows, on
+# pull_request and merge_group alike). All three run on every push and pull request.
 name: lint
 on:
   push: { branches: [main] }
@@ -31,5 +33,35 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
+      # review.yml checks its own release out through job.workflow_repository / job.workflow_sha, newer than 1.7.12's
+      # model of the job context; drop the -ignore once actionlint knows them
       - uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
-        with: { args: -color }
+        with: { args: -color -ignore workflow_(sha|repository).*not.defined }
+  # The check-run contract: the conformance crate in public-software/suite reads the workflows under review here as the
+  # reusable side, suite's own ci.yml and review.yml as the callers, and the rules GitHub applies to suite's main;
+  # a renamed job, a run-dependent name or a caller that skips the merge queue fails the pull request.
+  conformance:
+    name: conformance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # the workflows under review, suite's checkout and its branch rules
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: The suite repository (the crate and the callers)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: public-software/suite
+          path: suite
+          persist-credentials: false
+      - run: rustup update --no-self-update stable && rustup default stable   # the runner ships rustup
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with: { workspaces: suite }
+      - name: The rules GitHub applies to suite's main
+        run: gh api repos/public-software/suite/rules/branches/main > "$RUNNER_TEMP/rules.json"
+      - name: Every required check is a check run the callers produce, on pull requests and in the merge queue
+        run: >
+          cargo run --locked --manifest-path suite/Cargo.toml -p pub-suite-conformance --
+          --callers suite/.github/workflows --workflows .github/workflows --rules "$RUNNER_TEMP/rules.json"
