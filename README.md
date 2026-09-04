@@ -93,7 +93,9 @@ permission the workflow's own `GITHUB_TOKEN` authenticates the Copilot CLI; the 
 organization's Copilot budget, not to any person. Two organization policies make this work (Settings →
 Copilot → Policies): "Copilot CLI" and "Allow use of Copilot CLI billed to the organization" (Copilot
 Business). Without them the CLI fails with an authentication or entitlement error, the job names the policy,
-and `suite / policy` blocks with "no verdict to trust". The caller grants the same permission to its `suite`
+and `suite / policy` blocks with "no verdict to trust". The policy is on when `GET /orgs/{org}/copilot/billing`
+answers `"cli": "enabled"`; that field, not the settings page, is what the CLI's check reads (it stayed
+`unconfigured`, and the CLI refused, after the toggles were believed on). The caller grants the same permission to its `suite`
 job; a fork's pull request runs no agent, because a fork's token carries no Copilot permission (the
 deterministic checks and the human review still gate it, and a maintainer pushes the branch into the
 repository for the agent pass). The comment comes from `github-actions[bot]`.

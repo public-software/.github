@@ -91,7 +91,7 @@ jobs:
           cat copilot.log
           if [ -s usage.json ]; then { echo '### Agent review usage'; echo; echo '```json'; cat usage.json; echo; echo '```'; } >> "$GITHUB_STEP_SUMMARY"; fi
           if [ "$rc" != 0 ]; then
-            echo "::error::the Copilot CLI exited $rc; if the log shows an authentication or entitlement error, the organization policy \"Allow use of Copilot CLI billed to the organization\" is off (organization Settings → Copilot → Policies; Copilot Business)"
+            echo "::error::the Copilot CLI exited $rc; if the log shows an authentication or entitlement error, the organization policy \"Allow use of Copilot CLI billed to the organization\" is off (organization Settings → Copilot → Policies; Copilot Business) — it is on when GET /orgs/{org}/copilot/billing answers cli: enabled"
             exit "$rc"
           fi
       - id: verdict
