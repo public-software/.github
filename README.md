@@ -19,10 +19,10 @@ Every public document of every repository is written in Simplified Technical Eng
 Both are versioned as **immutable releases** of this repository. Callers pin the release commit:
 
 ```yaml
-uses: public-software/.github/.github/workflows/rust.yml@<sha> # v1.1.0
+uses: public-software/.github/.github/workflows/rust.yml@<sha> # v1.1.1
 ```
 
-`v1.1.0` is the current release. The tag `v1` (the major) always points at the newest `v1.x.y`
+`v1.1.1` is the current release. The tag `v1` (the major) always points at the newest `v1.x.y`
 release commit and exists for humans reading the history; it is never itself released, so it can move.
 
 Every third-party action in these workflows is pinned to a full commit SHA with its version as a comment.
@@ -52,8 +52,9 @@ change to the rulesets in the bootstrap kit, landed together.
    job or input, major when a check-run name or an input changes meaning.
 3. Run `./bootstrap.sh 04`. The kit pushes the change, publishes the immutable release at that commit and
    moves the major tag; a release that already exists is left alone (an immutable release cannot change).
-4. Repositories follow through Dependabot; `./bootstrap.sh 05` renders new repositories against the new
-   release from day one.
+4. `./bootstrap.sh 05` repins every existing repository's `ci.yml`, `mirror.yml` and `review.yml` at the new
+   release (one commit per repository, none when it already matches) and renders new repositories against it
+   from day one; Dependabot proposes later releases in each repository.
 
 ## Verification depth
 

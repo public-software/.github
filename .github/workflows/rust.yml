@@ -137,8 +137,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { persist-credentials: false }
       - run: rustup update --no-self-update stable && rustup default stable
-      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
-        with: { tool: cargo-vet }
+      # the version the stores are written with: `cargo vet --locked` compares the store against its own canonical
+      # form, and that form changed between 0.10.0 (install-action's latest, the last GitHub release) and 0.10.2
+      # (crates.io only), so the tool is built from crates.io at the pinned version once and cached after that
+      - uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
+        with: { tool: cargo-vet@0.10.2 }
       - run: |
           cargo vet --locked || { echo "::error::a dependency has no audit — run 'cargo vet' locally, audit or exempt what it lists, commit supply-chain/"; exit 1; }
   # audit: RustSec advisories and yanked releases in the lockfile
