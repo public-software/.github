@@ -86,7 +86,7 @@ jobs:
             *) echo "::error::a test leg ended with $LEGS"; exit 1 ;;
           esac
   deny:
-    name: deny
+    name: deny-check
     needs: probe
     if: needs.probe.outputs.has_crates == 'true'
     runs-on: ubuntu-latest
